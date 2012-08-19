@@ -1,4 +1,4 @@
-MODULE=httpaccept
+MODULE=httpheader
 pydoc:	$(MODULE).html
 	rm -f pydoc
 	ln -s $(MODULE).html pydoc
