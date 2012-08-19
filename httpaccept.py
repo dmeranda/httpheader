@@ -518,6 +518,7 @@ class content_type(object):
 # Some common media types
 enctype_formdata = content_type('multipart/form-data')
 enctype_urlencoded = content_type('application/x-www-form-urlencoded')
+multipart_byteranges = content_type('multipart/byteranges') # RFC 2616 sect 14.16
 octet_stream = content_type('application/octet-stream')
 html = content_type('text/html')
 xhtml = content_type('application/xhtml+xml')
