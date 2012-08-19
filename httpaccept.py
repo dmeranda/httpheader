@@ -3,27 +3,36 @@
 """ Utility functions to work with Accept-* headers as defined by HTTP 1.1.
 
 This module provides some utility functions useful for writing
-websites which want to deal with some of the HTTP protocol specifics;
+websites which want to deal with some of the HTTP protocol headers;
 especially the correct interpretation of the various Accept-* style
 headers, content negotiation, and so forth.
 
-The main functions this modules defines are:
+There are a few classes defined by this module:
 
- * parse_accept_header()
- * parse_media_type()
- * acceptable_content_type()
- * acceptable_charset()
- * acceptable_language()
+ * class content_type  -- media types such as 'text/plain'
+ * class language_tag  -- language tags such as 'en-US'
 
-It also defines a helper class, language_tag, which can be used to
-help interpret and compare languages.
+The primary functions this modules may be categorized as follows:
+
+ * Content negotiation functions...
+     * acceptable_content_type()
+     * acceptable_language()
+     * acceptable_charset()
+     * acceptable_encoding()
+
+ * Low-level string parsing functions...
+     * parse_accept_header()
+     * parse_comment()
+     * parse_token_or_quoted_string()
 
 See also:
 
-* RFC 2616, "Hypertext Transfer Protocol -- HTTP/1.1", June 1999.
-    <http://www.ietf.org/rfc/rfc2616.txt>
-* RFC 3066, "Tags for the Identification of Languages", January 2001.
-    <http://www.ietf.org/rfc/rfc3066.txt>
+ * RFC 2046, "(MIME) Part Two: Media Types", November 1996.
+             <http://www.ietf.org/rfc/rfc2046.txt>
+ * RFC 2616, "Hypertext Transfer Protocol -- HTTP/1.1", June 1999.
+             <http://www.ietf.org/rfc/rfc2616.txt>
+ * RFC 3066, "Tags for the Identification of Languages", January 2001.
+             <http://www.ietf.org/rfc/rfc3066.txt>
 """
 
 __author__ = """Deron Meranda <http://deron.meranda.us/>"""
@@ -47,6 +56,154 @@ License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 """
 
+# Character classes from RFC 2616 section 2.2
+separators = '()<>@,;:\\"/[]?={} \t'
+LWS = ' \t\n\r'  # linear white space
+CRLF = '\r\n'
+DIGIT = '0123456789'
+HEX = '0123456789ABCDEFabcdef'
+
+try:
+    # Turn into set types (for Python 2.4 or greater)
+    separators = frozenset([c for c in separators])
+    LWS = frozenset([c for c in LWS])
+    CRLF = frozenset([c for c in CRLF])
+    DIGIT = frozenset([c for c in DIGIT])
+    HEX = frozenset([c for c in HEX])
+    del c
+except NameError:
+    # Python 2.3 or earlier, leave as simple strings
+    pass
+
+
+def _is_string( obj ):
+    """Returns True if the object is a string or unicode type."""
+    return isinstance(obj,str) or isinstance(obj,unicode)
+
+
+def is_token(s):
+    """Determines if the string is a legal token."""
+    for c in s:
+        if ord(c) < 32 or ord(c) > 128 or c in separators:
+            return False
+    return True
+
+def parse_token_or_quoted_string(s, start=0, allow_quoted=True, allow_token=True):
+    """Parses a token or a quoted-string.
+
+    's' is the string to parse, while start is the position within the
+    string where parsing should begin.  It will returns a tuple
+    (token, chars_consumed), with all \-escapes and quotation already
+    processed.
+
+    Syntax is according to BNF rules in RFC 2161 section 2.2,
+    specifically the 'token' and 'quoted-string' declarations.
+    Syntax errors in the input string will result in ValueError
+    being raised.
+
+    If allow_quoted is False, then only tokens will be parsed instead
+    of either a token or quoted-string.
+
+    If allow_token is False, then only quoted-strings will be parsed
+    instead of either a token or quoted-string.
+    """
+    if not allow_quoted and not allow_token:
+        raise ValueError('Parsing can not continue with options provided')
+    if start >= len(s):
+        return IndexError('Starting position is beyond the end of the string')
+    has_quote = (s[start] == '"')
+    if has_quote and not allow_quoted:
+        return ValueError('A quoted string was not expected')
+    if not has_quote and not allow_token:
+        return ValueError('Expected a quotation mark')
+
+    s2 = ''
+    pos = start
+    if has_quote:
+        pos += 1
+    while pos < len(s):
+        c = s[pos]
+        if c == '\\' and has_quote:
+            # Note this is not C-style escaping; the character after the \ is
+            # taken literally.
+            pos += 1
+            if pos == len(s):
+                raise ValueError("End of string while expecting a character after '\\'")
+            s2 += s[pos]
+            pos += 1
+        elif c == '"' and has_quote:
+            break
+        elif not has_quote and (c in self.separators or ord(c)<32 or ord(c)>127):
+            break
+        else:
+            s2 += c
+            pos += 1
+    if has_quote:
+        # Make sure we have a closing quote mark
+        if pos >= len(s) or s[pos] != '"':
+            raise ValueError('Quoted string is missing closing quote mark')
+        else:
+            pos += 1
+    return s2, (pos - start)
+
+
+def parse_comment(s, start=0):
+    """Parses a ()-style comment from a header value.
+
+    Returns tuple (comment, chars_consumed), where the comment will
+    have had the outer-most parentheses and white space stripped.  Any
+    nested comments will still have their parentheses and whitespace
+    left intact.
+
+    All \-escaped quoted pairs will have been replaced with the actual
+    characters they represent, even within the inner nested comments.
+
+    You should note that only a few HTTP headers, such as User-Agent
+    or Via, allow ()-style comments within the header value.
+
+    """
+    if start >= len(s):
+        return IndexError('Starting position is beyond the end of the string')
+    if s[start] != '(':
+        raise ValueError('Comment must begin with opening parenthesis')
+
+    s2 = ''
+    nestlevel = 1
+    pos = start + 1
+    while pos < len(s) and s[pos] in LWS:
+        pos += 1
+
+    while pos < len(s):
+        c = s[pos]
+        if c == '\\':
+            # Note this is not C-style escaping; the character after the \ is
+            # taken literally.
+            pos += 1
+            if pos == len(s):
+                raise ValueError("End of string while expecting a character after '\\'")
+            s2 += s[pos]
+            pos += 1
+        elif c == '(':
+            nestlevel += 1
+            s2 += c
+            pos += 1
+        elif c == ')':
+            nestlevel -= 1
+            if nestlevel >= 1:
+                s2 += c
+                pos += 1
+            else:
+                break
+        else:
+            s2 += c
+            pos += 1
+    if nestlevel > 0:
+        raise ValueError('End of string reached before comment was closed')
+    # Now rstrip s2 of all LWS chars.
+    while len(s2) and s2[-1] in LWS:
+        s2 = s2[:-1]
+    return s2, (pos - start)
+    
 
 def _split_at_qfactor( s ):
     """Splits a string at the quality factor (;q=) parameter.
@@ -61,7 +218,6 @@ def _split_at_qfactor( s ):
     # We do this parsing 'manually' for speed rather than using a
     # regex, which would be r';[ \t\r\n]*q[ \t\r\n]*=[ \t\r\n]*'
 
-    LWS = ' \t\n\r'
     pos = 0
     while 0 <= pos < len(s):
         pos = s.find(';', pos)
@@ -100,29 +256,39 @@ def parse_accept_header( header_value ):
     (from most-prefered to least-prefered).  Each item in the returned
     list is actually a tuple consisting of:
 
-       ( item_name, qvalue, accept_parms )
+       ( item_name, item_parms, qvalue, accept_parms )
 
-    The item name depends upon which header is being parsed, but for
-    example may be a MIME content or media type, a language tag, or so
-    on.  No processing of the item strings is performed by this
-    function, so MIME types for example may still have paramters
-    attached to them, e.g., "text/plain;charset=iso-2022-kr".
+    As an example, the following string,
+        text/plain; charset="utf-8"; q=.5; columns=80
+    would be parsed into this resulting tuple,
+        ( 'text/plain', [('charset','utf-8')], 0.5, [('columns','80')] )
 
-    The qvalue is a float in the inclusive range 0.0 to 1.0.  Values
-    outside this range will be capped to the closest extreme.  Note
-    that a qvalue of 0 indicates that the item is explicitly NOT
-    acceptable to the user agent, and should be handled differently by
-    the caller.
+    The value of the returned item_name depends upon which header is
+    being parsed, but for example it may be a MIME content or media
+    type (without parameters), a language tag, or so on.  Any optional
+    parameters (delimited by semicolons) occuring before the "q="
+    attribute will be in the item_parms list as (attribute,value)
+    tuples in the same order as they appear in the header.  Any quoted
+    values will have been unquoted and unescaped.
 
-    The accept_parms will usually be an empty string, but it may
-    optionally carry a value with the Accept header (the HTTP spec
-    allows these extra parameters in the syntax, but does not
-    currently define any possible values).  If present it will be
-    preserved as a single string, internally formatted as a
-    semicolon-separated list of param=value qualifiers.
+    The qvalue is a floating point number in the inclusive range 0.0
+    to 1.0, and roughly indicates the preference for this item.
+    Values outside this range will be capped to the closest extreme.
 
-    Note that empty items will be removed.  However, duplicate values
-    are not detected or handled in any way.
+         (!) Note that a qvalue of 0 indicates that the item is
+         explicitly NOT acceptable to the user agent, and should be
+         handled differently by the caller.
+
+    The accept_parms, like the item_parms, is a list of any attributes
+    occuring after the "q=" attribute, and will be in the list as
+    (attribute,value) tuples in the same order as they occur.
+    Usually accept_parms will be an empty list, as the HTTP spec
+    allows these extra parameters in the syntax but does not
+    currently define any possible values.
+
+    All empty items will be removed from the list.  However, duplicate
+    or conflicting values are not detected or handled in any way by
+    this function.
 
     """
 
@@ -160,13 +326,50 @@ def parse_accept_header( header_value ):
 
 
 class content_type(object):
-    def __init__(self, content_type_string):
+    """This class represents a media type (aka a MIME content type).
+
+    You initialize these by passing in a content-type declaration string,
+    such as "text/plain", to the constructor or to the set() method.
+
+    Normally you will get the value by using str(), or optionally you
+    can access the components via the 'major', 'minor', and 'parmdict'
+    members.
+
+    """
+    def __init__(self, content_type_string=None):
+        if content_type_string:
+            self.set( content_type_string )
+        else:
+            self.set( '*/*' )
+
+    def set(self, content_type_string):
+        """Parses the content type string and sets this object to it's value."""
         major, minor, pdict = self._parse_media_type( content_type_string )
-        self.major = major
-        self.minor = minor
+        self._set_major( major )
+        self._set_minor( minor )
         self.parmdict = pdict
+        
+    def _get_major(self):
+        return self._major
+    def _set_major(self, s):
+        s = s.lower()  # case-insentive
+        if not is_token(s):
+            raise ValueError('Major media type contains an illegal character')
+        self._major = s
+
+    def _get_minor(self):
+        return self._minor
+    def _set_minor(self, s):
+        s = s.lower()  # case-insentive
+        if not is_token(s):
+            raise ValueError('Minor media type contains an illegal character')
+        self._minor = s
+
+    major = property(_get_major,_set_major,doc="Major media classification")
+    minor = property(_get_minor,_set_minor,doc="Minor media sub-classification")
 
     def __str__(self):
+        """String value."""
         s = '%s/%s' % (self.major, self.minor)
         if self.parmdict:
             extra = '; '.join([ '%s=%s' % (a[0],self._quote(a[1])) \
@@ -174,15 +377,57 @@ class content_type(object):
             s += '; ' + extra
         return s
 
+    def __unicode__(self):
+        """Unicode string value."""
+        return unicode(self.__str__())
+
     def __repr__(self):
+        """Python representation of this object."""
         s = '%s(%s)' % (self.__class__.__name__, repr(self.__str__()))
         return s
 
-    separators = '()<>@,;:\\"/[]?={} \t'  # RFC 2616 sect 2.2
-    lws = '\r\n \t'
 
+    def __hash__(self):
+        """Hash this object; the hash is dependent only upon the value."""
+        return hash(str(self))
+
+    def __getstate__(self):
+        """Pickler"""
+        return str(self)
+
+    def __setstate__(self, state):
+        """Unpickler"""
+        self.set(state)
+
+    def __len__(self):
+        """Logical length of this media type.
+        For example:
+           len('*/*')  -> 0
+           len('image/*') -> 1
+           len('image/png') -> 2
+           len('text/plain; charset=utf-8')  -> 3
+           len('text/plain; charset=utf-8; filename=xyz.txt') -> 4
+
+        """
+        if self.major == '*':
+            return 0
+        elif self.minor == '*':
+            return 1
+        else:
+            return 2 + len(self.parmdict)
+
+    def __eq__(self, other):
+        """Equality test."""
+        return self.major == other.major and \
+                   self.minor == other.minor and \
+                   self.parmdict == other.parmdict
+
+    def __ne__(self, other):
+        """Inequality test."""
+        return not self.__eq__(other)
+            
     def _quote(self, val):
-        """Produces a token, or a quoted string if necessary.
+        """Produces a token, or a quoted string if necessary, from the input string value.
         """
         need_quotes = False
         s = ''
@@ -195,35 +440,6 @@ class content_type(object):
         if need_quotes:
             s = '"%s"' % s
         return s
-
-    def _parse_token(self, s, start=0, allow_quoted=True):
-        """Parses a token or a quoted string.  Returns tuple (token,chars_consumed).
-        """
-        if start >= len(s):
-            return ('',0)
-        has_quote = (s[start] == '"')
-        if has_quote and not allow_quoted:
-            return ('',0)
-        s2 = ''
-        if has_quote:
-            start += 1
-        pos = start
-        while pos < len(s):
-            c = s[pos]
-            if c == '\\' and has_quote:
-                pos += 1
-                s2 += s[pos]
-            elif c == '"' and has_quote:
-                pos += 1
-                break
-            elif c in self.separators or ord(c)<32 or ord(c)>127:
-                break
-            else:
-                s2 += c
-            pos += 1
-        if has_quote and (pos >= len(s) or s[pos] != '"'):
-            raise ValueError('Quoted string is missing closing quote mark')
-        return s2, pos
 
     def _parse_media_type(self, media_type):
         """Parses a media type (MIME type) designator into it's parts.
@@ -244,22 +460,22 @@ class content_type(object):
             ctmin, ctparms = ctmin.split(';', 1)
             i = 0
             while i < len(ctparms):
-                while i < len(ctparms) and ctparms[i] in self.lws:
+                while i < len(ctparms) and ctparms[i] in LWS:
                     i += 1
-                pname, i = self._parse_token( ctparms, start=i, allow_quoted=False )
-                while i < len(ctparms) and ctparms[i] in self.lws:
+                pname, i = parse_token_or_quoted_string( ctparms, start=i, allow_quoted=False )
+                while i < len(ctparms) and ctparms[i] in LWS:
                     i += 1
                 #print 'pname=[%s]' % pname, 'at', i
                 if i < len(ctparms) and ctparms[i] == '=':
                     i += 1
-                    while i < len(ctparms) and ctparms[i] in self.lws:
+                    while i < len(ctparms) and ctparms[i] in LWS:
                         i += 1
                     #print 'found = at', i
-                    pval, i = self._parse_token( ctparms, start=i, allow_quoted=True )
+                    pval, i = parse_token_or_quoted_string( ctparms, start=i, allow_quoted=True )
                 else:
                     pval = ''
                 #print 'pval=[%s]' % pval, 'at', i
-                while i < len(ctparms) and ctparms[i] in self.lws:
+                while i < len(ctparms) and ctparms[i] in LWS:
                     i += 1
                 if i < len(ctparms):
                     if ctparms[i] == ';':
@@ -272,8 +488,39 @@ class content_type(object):
                 raise ValueError('Syntax error in content type parmeters')
         return (ctmaj, ctmin, parmlist)
 
+    def media_type(self):
+        """Returns the media 'type/subtype' string, without parameters."""
+        return '%s/%s' % (self.major, self.minor)
+
+    def is_wildcard(self):
+        """Returns True if this is a 'something/*' media type.
+        """
+        return self.minor == '*'
+
     def is_universal_wildcard(self):
+        """Returns True if this is the unspecified '*/*' media type.
+        """
         return self.major == '*' and self.minor == '*'
+
+    def is_composite(self):
+        """Is this media type composed of multiple parts.
+        """
+        return self.major == 'multipart' or self.major == 'message'
+
+    def is_xml(self):
+        """Returns True if this media type is XML-based.
+
+        Note this does not consider text/html to be XML, but
+        application/xhtml+xml is.
+        """
+        return self.minor == 'xml' or self.minor.endswith('+xml')
+
+# Some common media types
+enctype_formdata = content_type('multipart/form-data')
+enctype_urlencoded = content_type('application/x-www-form-urlencoded')
+octet_stream = content_type('application/octet-stream')
+html = content_type('text/html')
+xhtml = content_type('application/xhtml+xml')
 
 
 def acceptable_content_type( accept_header, content_types, ignore_wildcard=True ):
@@ -312,15 +559,15 @@ def acceptable_content_type( accept_header, content_types, ignore_wildcard=True 
     See also: RFC 2616 section 14.1, and
     <http://www.iana.org/assignments/media-types/>
     """
-    if isinstance(accept_header,str) or isinstance(accept_header,unicode):
+    if _is_string(accept_header):
         accept_list = parse_accept_header(accept_header)
     else:
         accept_list = accept_header
 
-    if isinstance(content_types,str) or isinstance(content_types,unicode):
+    if _is_string(content_types):
         content_types = [content_types]
 
-    server_ctlist = [parse_media_type(ct) for ct in content_types]
+    #server_ctlist = [content_type(ct) for ct in content_types]
 
     best = None
     for ct, qvalue, aargs in accept_list:
@@ -333,7 +580,9 @@ def acceptable_content_type( accept_header, content_types, ignore_wildcard=True 
         if ignore_wildcard and ctmaj=='*' and ctmin=='*':
             continue  # */* being ignored
 
-        for server_ct in server_ctlist:
+        for server_ct in content_types:
+            server_ct = content_type(server_ct)
+
             test_ctmaj, test_ctmin, test_ctparms = server_ct
             # The best match is determined first by the quality factor,
             # and then by the most specific match.
@@ -402,12 +651,12 @@ def acceptable_charset( accept_charset_header, charsets, ignore_wildcard=True, d
     if default:
         default = _canonical_charset(default)
 
-    if type(accept_charset_header) is type('') or type(accept_charset_header) is type(u''):
+    if _is_string(accept_charset_header):
         accept_list = parse_accept_header(accept_charset_header)
     else:
         accept_list = accept_charset_header
 
-    if type(charsets) is type('') or type(charsets) is type(u''):
+    if _is_string(charsets):
         charsets = [_canonical_charset(charsets)]
     else:
         charsets = [_canonical_charset(c) for c in charsets]
@@ -438,7 +687,7 @@ def acceptable_charset( accept_charset_header, charsets, ignore_wildcard=True, d
 
 
 
-class language_tag:
+class language_tag(object):
     """This class represents an RFC 3066 language tag.
 
     Initialize objects of this class with a single string representing
@@ -634,7 +883,7 @@ def acceptable_language( accept_language, languages, ignore_wildcard=True, assum
     #   Accept-Language field is the quality value of the longest
     #   language- range in the field that matches the language-tag."
 
-    if isinstance(accept_language,str) or isinstance(accept_language,unicode):
+    if _is_string(accept_language):
         accept_list = parse_accept_header(accept_language)
     else:
         accept_list = accept_header
@@ -660,7 +909,7 @@ def acceptable_language( accept_language, languages, ignore_wildcard=True, assum
                         all_tags.append( suptag )
         accept_list.extend( to_add )
 
-    if isinstance(languages,str) or isinstance(languages,unicode):
+    if _is_string(languages):
         server_languages = [language_tag(languages)]
     else:
         server_languages = [language_tag(lang) for lang in languages]
