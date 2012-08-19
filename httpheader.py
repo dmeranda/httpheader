@@ -1,45 +1,48 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+#
 """ Utility functions to work with HTTP headers.
 
-This module provides some utility functions useful for parsing
-and dealing with some of the HTTP 1.1 protocol headers which
-are not adequately covered by the standard Python libraries.
+ This module provides some utility functions useful for parsing
+ and dealing with some of the HTTP 1.1 protocol headers which
+ are not adequately covered by the standard Python libraries.
 
-The functionality includes the correct interpretation of the various
-Accept-* style headers, content negotiation, byte range requests,
-HTTP-style date/times, and more.
+ Requires Python 2.2 or later.
 
-There are a few classes defined by this module:
+ The functionality includes the correct interpretation of the various
+ Accept-* style headers, content negotiation, byte range requests,
+ HTTP-style date/times, and more.
 
- * class content_type   -- media types such as 'text/plain'
- * class language_tag   -- language tags such as 'en-US'
- * class range_set      -- a collection of (byte) range specifiers
- * class range_spec     -- a single (byte) range specifier
+ There are a few classes defined by this module:
 
-The primary functions in this module may be categorized as follows:
+   * class content_type   -- media types such as 'text/plain'
+   * class language_tag   -- language tags such as 'en-US'
+   * class range_set      -- a collection of (byte) range specifiers
+   * class range_spec     -- a single (byte) range specifier
 
- * Content negotiation functions...
+ The primary functions in this module may be categorized as follows:
+
+   * Content negotiation functions...
      * acceptable_content_type()
      * acceptable_language()
      * acceptable_charset()
      * acceptable_encoding()
 
- * Mid-level header parsing functions...
+   * Mid-level header parsing functions...
      * parse_accept_header()
      * parse_accept_language_header()
      * parse_range_header()
  
- * Date and time...
+   * Date and time...
      * http_datetime()
      * parse_http_datetime()
 
- * Utility functions...
+   * Utility functions...
      * quote_string()
      * remove_comments()
      * canonical_charset()
 
- * Low level string parsing functions...
+   * Low level string parsing functions...
      * parse_comma_list()
      * parse_comment()
      * parse_qvalue_accept_list()
@@ -52,24 +55,24 @@ The primary functions in this module may be categorized as follows:
      * parse_token()
      * parse_token_or_quoted_string()
 
-And there are some specialized exception classes:
+ And there are some specialized exception classes:
 
-  * RangeUnsatisfiableError
-  * RangeUnmergableError
-  * ParseError
+   * RangeUnsatisfiableError
+   * RangeUnmergableError
+   * ParseError
 
-See also:
+ See also:
 
- * RFC 2616, "Hypertext Transfer Protocol -- HTTP/1.1", June 1999.
+   * RFC 2616, "Hypertext Transfer Protocol -- HTTP/1.1", June 1999.
              <http://www.ietf.org/rfc/rfc2616.txt>
              Errata at <http://purl.org/NET/http-errata>
- * RFC 2046, "(MIME) Part Two: Media Types", November 1996.
+   * RFC 2046, "(MIME) Part Two: Media Types", November 1996.
              <http://www.ietf.org/rfc/rfc2046.txt>
- * RFC 3066, "Tags for the Identification of Languages", January 2001.
+   * RFC 3066, "Tags for the Identification of Languages", January 2001.
              <http://www.ietf.org/rfc/rfc3066.txt>
 """
 
-__author__ = """Deron Meranda <http://deron.meranda.us/>"""
+__author__ = "Deron Meranda <http://deron.meranda.us/>"
 __date__ = "2005-12-19"
 __version__ = "1.0"
 __credits__ = """Copyright (c) 2005 Deron E. Meranda <http://deron.meranda.us/>
@@ -97,8 +100,19 @@ CRLF = '\r\n'
 DIGIT = '0123456789'
 HEX = '0123456789ABCDEFabcdef'
 
+# Try to get a set/frozenset implementation if possible
 try:
-    # Turn into set types (for Python 2.4 or greater)
+    type(frozenset)
+except NameError:
+    try:
+        # The demset.py module is available at http://deron.meranda.us/
+        from demset import set, frozenset
+        __emulating_set = True  # So we can clean up global namespace later
+    except ImportError:
+        pass
+
+try:
+    # Turn character classes into set types (for Python 2.4 or greater)
     SEPARATORS = frozenset([c for c in SEPARATORS])
     LWS = frozenset([c for c in LWS])
     CRLF = frozenset([c for c in CRLF])
@@ -1246,17 +1260,23 @@ def parse_parameter_list(s, start=0):
 
 
 class content_type(object):
-    """This class represents a media type (aka a MIME content type).
+    """This class represents a media type (aka a MIME content type), including parameters.
 
-    You initialize these by passing in a content-type declaration string,
-    such as "text/plain", to the constructor or to the set() method.
+    You initialize these by passing in a content-type declaration
+    string, such as "text/plain; charset=ascii", to the constructor or
+    to the set() method.  If you provide no string value, the object
+    returned will represent the wildcard */* content type.
 
-    Normally you will get the value by using str(), or optionally you
-    can access the components via the 'major', 'minor', and 'parmdict'
-    members.
+    Normally you will get the value back by using str(), or optionally
+    you can access the components via the 'major', 'minor', 'media_type',
+    or 'parmdict' members.
 
     """
     def __init__(self, content_type_string=None, with_parameters=True):
+        """Create a new content_type object.
+
+        See the set() method for a description of the arguments.
+        """
         if content_type_string:
             self.set( content_type_string, with_parameters=with_parameters )
         else:
@@ -1280,7 +1300,11 @@ class content_type(object):
         self.parmdict = dict(pl)
 
     def set(self, content_type_string, with_parameters=True):
-        """Parses the content type string and sets this object to it's value."""
+        """Parses the content type string and sets this object to it's value.
+
+        For a more complete description of the arguments, see the
+        documentation for the parse_media_type() function in this module.
+        """
         mt, k = parse_media_type( content_type_string, with_parameters=with_parameters )
         if k < len(content_type_string):
             raise ParseError('Not a valid content type',content_type_string, k)
@@ -1357,7 +1381,10 @@ class content_type(object):
             return 2 + len(self.parmdict)
 
     def __eq__(self, other):
-        """Equality test."""
+        """Equality test.
+
+        Note that this is an exact match, including any parameters if any.
+        """
         return self.major == other.major and \
                    self.minor == other.minor and \
                    self.parmdict == other.parmdict
@@ -1366,9 +1393,11 @@ class content_type(object):
         """Inequality test."""
         return not self.__eq__(other)
             
-    def media_type(self):
+    def _get_media_type(self):
         """Returns the media 'type/subtype' string, without parameters."""
         return '%s/%s' % (self.major, self.minor)
+
+    media_type = property(_get_media_type, doc="Returns the just the media type 'type/subtype' without any paramters (read-only).")
 
     def is_wildcard(self):
         """Returns True if this is a 'something/*' media type.
@@ -1444,6 +1473,7 @@ def acceptable_content_type( accept_header, content_types, ignore_wildcard=True 
 
     See also: RFC 2616 section 14.1, and
     <http://www.iana.org/assignments/media-types/>
+
     """
     if _is_string(accept_header):
         accept_list = parse_accept_header(accept_header)
@@ -1953,5 +1983,14 @@ def acceptable_language( accept_header, server_languages, ignore_wildcard=True, 
     if not best:
         return None
     return best[0]
+
+
+# Clean up global namespace
+try:
+    if __emulating_set:
+        del set
+        del frozenset
+except NameError:
+    pass
 
 # end of file
