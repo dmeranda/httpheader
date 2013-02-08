@@ -1,0 +1,11 @@
+Change history for httpheader python module.
+
+Version 1.1 released 2013-02-08
+
+ * Bug fix. The 'ignore_wildcard' argument of the
+   acceptable_content_type() function did not work properly when
+   passed as True, as any content type of "*/*" would be ignored.
+
+Version 1.0 released 2005-12-19
+
+ * First public release.
