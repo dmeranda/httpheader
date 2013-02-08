@@ -73,9 +73,9 @@
 """
 
 __author__ = "Deron Meranda <http://deron.meranda.us/>"
-__date__ = "2005-12-19"
-__version__ = "1.0"
-__credits__ = """Copyright (c) 2005 Deron E. Meranda <http://deron.meranda.us/>
+__date__ = "2013-02-08"
+__version__ = "1.1"
+__credits__ = """Copyright (c) 2005-2013 Deron E. Meranda <http://deron.meranda.us/>
 Licensed under GNU LGPL 2.1 or later.  See <http://www.fsf.org/>.
 
 This library is free software; you can redistribute it and/or
@@ -1331,6 +1331,9 @@ class content_type(object):
 
     major = property(_get_major,_set_major,doc="Major media classification")
     minor = property(_get_minor,_set_minor,doc="Minor media sub-classification")
+
+    def __nonzero__(self):
+        return True
 
     def __str__(self):
         """String value."""
