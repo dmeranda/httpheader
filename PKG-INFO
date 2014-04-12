@@ -1,0 +1,21 @@
+Metadata-Version: 1.1
+Name: httpheader
+Version: 1.1
+Summary: Utility functions to parse HTTP 1.1 protocol headers.
+Home-page: http://deron.meranda.us/python/httpheader/
+Author: Deron Meranda
+Author-email: deron.meranda@gmail.com
+License: GNU LGPL
+Download-URL: http://deron.meranda.us/python/httpheader/dist/httpheader-1.1.tar.gz
+Description: This module provides several utility functions for parsing various
+        HTTP headers; such as those dealing with byte range requests and
+        content negotiation (Accept-xxx headers).  It tries to be an exact
+        implementation of the HTTP 1.1 RFC.
+Keywords: http
+Platform: UNKNOWN
+Classifier: License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)
+Classifier: Development Status :: 6 - Mature
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python :: 2 :: Only
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Topic :: Software Development :: Libraries :: Python Modules

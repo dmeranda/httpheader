@@ -91,3 +91,7 @@ More information
 
 Complete documentation and additional information is available on the
 [httpheader project homepage](http://deron.meranda.us/python/httpheader/).
+
+This module is also registered on the Python Package Index (PyPI)
+as package "httpheader".  This should make it easy to install into
+most Python environments.
